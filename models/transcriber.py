@@ -59,20 +59,20 @@ class BiLSTM(nn.Module):
 
 
 class OnsetLoss(nn.Module):
-    def forward(self, onset_label, onset_pred):
-        return F.binary_cross_entropy(onset_label, onset_pred)
+    def forward(self, onset_pred, onset_label):
+        return F.binary_cross_entropy(onset_pred, onset_label)
 
 
 class FrameLoss(nn.Module):
-    def forward(self, ramp_label, frame_label, frame_pred):
+    def forward(self, frame_pred, frame_label, ramp_label):
         weights = 5.0 / ramp_label
         weights[weights == INFINITY] = 1.0
-        return F.binary_cross_entropy(frame_label, frame_pred, weight=weights)
+        return F.binary_cross_entropy(frame_pred, frame_label, weight=weights)
 
 
 class VelocityLoss(nn.Module):
-    def forward(self, onset_label, velocity_label, velocity_pred):
-        return torch.mean(onset_label * (velocity_label - velocity_pred) ** 2)
+    def forward(self, velocity_pred, velocity_label, onset_label):
+        return (onset_label * (velocity_label - velocity_pred) ** 2).sum() / onset_label.sum()
 
 
 class OnsetsAndFrames(nn.Module):

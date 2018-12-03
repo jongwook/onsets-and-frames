@@ -68,11 +68,14 @@ class STFT(torch.nn.Module):
 
 
 class MelSpectrogram(torch.nn.Module):
-    def __init__(self, sample_rate, filter_length, n_mels,
-                 hop_length, win_length=None,
-                 mel_fmin=0.0, mel_fmax=8000.0):
+    def __init__(self, n_mels, sample_rate, filter_length, hop_length,
+                 win_length=None, mel_fmin=0.0, mel_fmax=None):
         super(MelSpectrogram, self).__init__()
         self.stft = STFT(filter_length, hop_length, win_length)
+
+        if mel_fmax is None:
+            mel_fmax = sample_rate // 2
+
         mel_basis = mel(sample_rate, filter_length, n_mels, mel_fmin, mel_fmax)
         mel_basis = torch.from_numpy(mel_basis).float()
         self.register_buffer('mel_basis', mel_basis)
@@ -84,7 +87,7 @@ class MelSpectrogram(torch.nn.Module):
         y: Variable(torch.FloatTensor) with shape (B, T) in range [-1, 1]
         RETURNS
         -------
-        mel_output: torch.FloatTensor of shape (B, n_mel_channels, T)
+        mel_output: torch.FloatTensor of shape (B, T, n_mels)
         """
         assert(torch.min(y.data) >= -1)
         assert(torch.max(y.data) <= 1)
