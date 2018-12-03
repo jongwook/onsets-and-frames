@@ -15,6 +15,7 @@ DEFAULT_DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 SAMPLE_RATE = 16000
 HOP_LENGTH = SAMPLE_RATE * 8 // 1000
 ONSET_LENGTH = SAMPLE_RATE * 32 // 1000
+HOPS_IN_ONSET = ONSET_LENGTH // HOP_LENGTH
 MIN_MIDI = 21
 MAX_MIDI = 108
 
@@ -47,12 +48,15 @@ class PianoRollAudioDataset(Dataset):
             end = begin + self.sequence_length
 
             result['audio'] = data['audio'][begin:end].to(self.device)
-            result['onsets'] = data['onsets'][:, step_begin:step_end].to(self.device)
-            result['frames'] = data['frames'][:, step_begin:step_end].to(self.device)
+            result['ramps'] = data['ramps'][:, step_begin:step_end].to(self.device)
+            result['velocities'] = data['velocities'][:, step_begin:step_end].to(self.device)
         else:
             result['audio'] = data['audio'].to(self.device)
-            result['onsets'] = data['onsets'].to(self.device)
-            result['frames'] = data['frames'].to(self.device)
+            result['ramps'] = data['ramps'].to(self.device)
+            result['velocities'] = data['velocities'].to(self.device)
+
+        result['onsets'] = result['ramps'] == 1
+        result['frames'] = result['ramps'] > 0
 
         return result
 
@@ -82,10 +86,10 @@ class PianoRollAudioDataset(Dataset):
             audio: torch.ShortTensor, shape = [num_samples]
                 the raw waveform
 
-            onsets: torch.ByteTensor, shape = [midi_bins, num_steps]
-                a matrix that contains MIDI velocity values at note onsets, whose length is determined by ONSET_LENGTH
+            ramp: torch.ByteTensor, shape = [midi_bins, num_steps]
+                a matrix that contains the number of frames after the corresponding onset
 
-            frames: torch.ByteTensor, shape = [midi_bins, num_steps]
+            velocity: torch.ByteTensor, shape = [midi_bins, num_steps]
                 a matrix that contains MIDI velocity values at the frame locations
         """
         raise NotImplementedError
@@ -119,8 +123,12 @@ class Maestro(PianoRollAudioDataset):
         n_keys = MAX_MIDI - MIN_MIDI + 1
         n_steps = (audio_length - 1) // HOP_LENGTH + 1
 
-        onsets = torch.zeros(n_keys, n_steps, dtype=torch.int8)
-        frames = torch.zeros(n_keys, n_steps, dtype=torch.int8)
+        ramp_template = torch.ByteTensor(HOPS_IN_ONSET + 254)
+        ramp_template[:HOPS_IN_ONSET] = 1
+        ramp_template[-254:] = torch.arange(2, 256, dtype=torch.uint8)
+
+        ramps = torch.zeros(n_keys, n_steps, dtype=torch.uint8)
+        velocities = torch.zeros(n_keys, n_steps, dtype=torch.uint8)
 
         tsv_path = midi_filename.replace('.midi', '.tsv').replace('.mid', '.tsv')
         if os.path.exists(tsv_path):
@@ -132,14 +140,14 @@ class Maestro(PianoRollAudioDataset):
             left = int(round(onset * SAMPLE_RATE / HOP_LENGTH))
             frame_right = int(round(offset * SAMPLE_RATE / HOP_LENGTH))
             frame_right = min(n_steps, frame_right)
-            onset_right = left + int(ONSET_LENGTH / HOP_LENGTH)
-            onset_right = min(n_steps, onset_right)
+            ramp_right = min(frame_right, left + len(ramp_template))
 
             f = int(note) - MIN_MIDI
-            onsets[f, left:onset_right] = velocity
-            frames[f, left:frame_right] = velocity
+            ramps[f, left:ramp_right] = ramp_template[:ramp_right - left]
+            ramps[f, ramp_right:frame_right] = 255
+            velocities[f, left:frame_right] = velocity
 
-        data = dict(audio=audio, onsets=onsets, frames=frames)
+        data = dict(audio=audio, ramps=ramps, velocities=velocities)
         torch.save(data, saved_data_path)
         return data
 

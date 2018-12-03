@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 from dataset import *
 from utils import *
-from models.transcriber import OnsetsAndFrames
+from models import OnsetsAndFrames
 
 ex = Experiment('transynth')
 
@@ -42,4 +42,10 @@ def train(logdir, device, iterations,
 
     loop = tqdm(range(1, iterations + 1))
     for i, batch in zip(loop, cycle(loader)):
+        audio_label = batch['audio']
+        onset_label = batch['onsets']
+        frame_label = batch['frames']
+        velocity_label = batch['velocities']
+        ramp_label = batch['ramps']
+
         break

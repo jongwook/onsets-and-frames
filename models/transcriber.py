@@ -6,6 +6,10 @@ A rough translation of Magenta's Onsets and Frames implementation [1].
 
 import torch
 from torch import nn
+import torch.nn.functional as F
+
+
+INFINITY = float('inf')
 
 
 class ConvStack(nn.Module):
@@ -54,6 +58,23 @@ class BiLSTM(nn.Module):
         return self.rnn(x)[0]
 
 
+class OnsetLoss(nn.Module):
+    def forward(self, onset_label, onset_pred):
+        return F.binary_cross_entropy(onset_label, onset_pred)
+
+
+class FrameLoss(nn.Module):
+    def forward(self, ramp_label, frame_label, frame_pred):
+        weights = 5.0 / ramp_label
+        weights[weights == INFINITY] = 1.0
+        return F.binary_cross_entropy(frame_label, frame_pred, weight=weights)
+
+
+class VelocityLoss(nn.Module):
+    def forward(self, onset_label, velocity_label, velocity_pred):
+        return torch.mean(onset_label * (velocity_label - velocity_pred) ** 2)
+
+
 class OnsetsAndFrames(nn.Module):
     def __init__(self, input_features, output_features, hidden_features=768):
         super().__init__()
@@ -78,6 +99,10 @@ class OnsetsAndFrames(nn.Module):
             ConvStack(input_features, hidden_features),
             nn.Linear(hidden_features, output_features)
         )
+
+        self.onset_loss = OnsetLoss()
+        self.frame_loss = FrameLoss()
+        self.velocity_loss = VelocityLoss()
 
     def forward(self, mel):
         onset_probs = self.onset_stack(mel)
