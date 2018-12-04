@@ -1,6 +1,7 @@
 import json
 import os
 from abc import abstractmethod
+from glob import glob
 
 import numpy as np
 import soundfile
@@ -42,7 +43,7 @@ class PianoRollAudioDataset(Dataset):
 
     def __getitem__(self, index):
         data = self.data[index]
-        result = {}
+        result = dict(path=data['path'])
 
         if self.sequence_length is not None:
             audio_length = len(data['audio'])
@@ -74,17 +75,22 @@ class PianoRollAudioDataset(Dataset):
 
     @classmethod
     @abstractmethod
+    def default_groups(cls):
+        raise NotImplementedError
+
+    @classmethod
+    @abstractmethod
     def available_groups(cls):
         """return the names of all available groups"""
         raise NotImplementedError
 
     @abstractmethod
     def files(self, group):
-        """return the list of input files in a group"""
+        """return the list of input files (audio_filename, tsv_filename) for this group"""
         raise NotImplementedError
 
     @abstractmethod
-    def load(self, *args):
+    def load(self, audio_path, tsv_path):
         """
         load an audio track and the corresponding labels
 
@@ -101,29 +107,11 @@ class PianoRollAudioDataset(Dataset):
             velocity: torch.ByteTensor, shape = [num_steps, midi_bins]
                 a matrix that contains MIDI velocity values at the frame locations
         """
-        raise NotImplementedError
-
-
-class Maestro(PianoRollAudioDataset):
-
-    def __init__(self, path='data/MAESTRO', groups=None, sequence_length=None):
-        super().__init__(path, groups if groups is not None else ['train'], sequence_length)
-
-    @classmethod
-    def available_groups(cls):
-        return ['train', 'validation', 'test']
-
-    def files(self, group):
-        metadata = json.load(open(os.path.join(self.path, 'maestro-v1.0.0.json')))
-        return sorted([(os.path.join(self.path, row['audio_filename'].replace('.wav', '.flac')),
-                        os.path.join(self.path, row['midi_filename'])) for row in metadata if row['split'] == group])
-
-    def load(self, audio_filename, midi_filename):
-        saved_data_path = audio_filename.replace('.flac', '.pt')
+        saved_data_path = audio_path.replace('.flac', '.pt')
         if os.path.exists(saved_data_path):
             return torch.load(saved_data_path)
 
-        audio, sr = soundfile.read(audio_filename, dtype='int16')
+        audio, sr = soundfile.read(audio_path, dtype='int16')
         assert sr == SAMPLE_RATE
 
         audio = torch.ShortTensor(audio)
@@ -139,11 +127,8 @@ class Maestro(PianoRollAudioDataset):
         ramps = torch.zeros(n_steps, n_keys, dtype=torch.uint8)
         velocities = torch.zeros(n_steps, n_keys, dtype=torch.uint8)
 
-        tsv_path = midi_filename.replace('.midi', '.tsv').replace('.mid', '.tsv')
-        if os.path.exists(tsv_path):
-            midi = np.loadtxt(tsv_path, delimiter='\t', skiprows=1)
-        else:
-            midi = parse_midi(midi_filename)
+        tsv_path = tsv_path
+        midi = np.loadtxt(tsv_path, delimiter='\t', skiprows=1)
 
         for onset, offset, note, velocity in midi:
             left = int(round(onset * SAMPLE_RATE / HOP_LENGTH))
@@ -156,9 +141,33 @@ class Maestro(PianoRollAudioDataset):
             ramps[ramp_right:frame_right, f] = 255
             velocities[left:frame_right, f] = velocity
 
-        data = dict(audio=audio, ramps=ramps, velocities=velocities)
+        data = dict(path=audio_path, audio=audio, ramps=ramps, velocities=velocities)
         torch.save(data, saved_data_path)
         return data
+
+
+class Maestro(PianoRollAudioDataset):
+
+    def __init__(self, path='data/MAESTRO', groups=None, sequence_length=None):
+        super().__init__(path, groups if groups is not None else ['train'], sequence_length)
+
+    @classmethod
+    def available_groups(cls):
+        return ['train', 'validation', 'test']
+
+    def files(self, group):
+        metadata = json.load(open(os.path.join(self.path, 'maestro-v1.0.0.json')))
+        files = sorted([(os.path.join(self.path, row['audio_filename'].replace('.wav', '.flac')),
+                         os.path.join(self.path, row['midi_filename'])) for row in metadata if row['split'] == group])
+
+        result = []
+        for audio_path, midi_path in files:
+            tsv_filename = midi_path.replace('.midi', '.tsv').replace('.mid', '.tsv')
+            if not os.path.exists(tsv_filename):
+                midi = parse_midi(midi_path)
+                np.savetxt(tsv_filename, midi, fmt='%.6f', delimiter='\t', header='onset,offset,note,velocity')
+            result.append((audio_path, tsv_filename))
+        return result
 
 
 class MAPS(PianoRollAudioDataset):
@@ -169,4 +178,11 @@ class MAPS(PianoRollAudioDataset):
     def available_groups(cls):
         return ['AkPnBcht', 'AkPnBsdf', 'AkPnCGdD', 'AkPnStgb', 'ENSTDkAm', 'ENSTDkCl', 'SptkBGAm', 'SptkBGCl', 'StbgTGd2']
 
-    # TODO: implement the other methods
+    def files(self, group):
+        flacs = glob(os.path.join(self.path, 'flac', '*_%s.flac' % group))
+        tsvs = [f.replace('/flac/', '/tsv/matched/').replace('.flac', '.tsv') for f in flacs]
+
+        assert(all(os.path.isfile(flac) for flac in flacs))
+        assert(all(os.path.isfile(tsv) for tsv in tsvs))
+
+        return sorted(zip(flacs, tsvs))

@@ -5,11 +5,9 @@ A rough translation of Magenta's Onsets and Frames implementation [1].
 """
 
 import torch
-from torch import nn
 import torch.nn.functional as F
-
-
-INFINITY = float('inf')
+from numpy import inf
+from torch import nn
 
 
 class ConvStack(nn.Module):
@@ -66,7 +64,7 @@ class OnsetLoss(nn.Module):
 class FrameLoss(nn.Module):
     def forward(self, frame_pred, frame_label, ramp_label):
         weights = 5.0 / ramp_label
-        weights[weights == INFINITY] = 1.0
+        weights[weights == inf] = 1.0
         return F.binary_cross_entropy(frame_pred, frame_label, weight=weights)
 
 

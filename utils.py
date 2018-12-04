@@ -4,6 +4,7 @@ from functools import reduce
 from torch.nn.modules.module import _addindent
 import torch
 import numpy as np
+from PIL import Image
 
 
 def summary(model, file=sys.stdout):
@@ -99,3 +100,24 @@ def cycle(iterable):
     while True:
         for item in iterable:
             yield item
+
+
+def save_pianoroll(path, onsets, frames, threshold=0.5, zoom=2):
+    """
+    Saves a piano roll diagram
+
+    Parameters
+    ----------
+    path: str
+    onsets: torch.FloatTensor, shape = [frames, bins]
+    frames: torch.FloatTensor, shape = [frames, bins]
+    threshold: float
+    zoom: int
+    """
+    onsets = (1 - (onsets.t() > threshold)).cpu()
+    frames = (1 - (frames.t() > threshold)).cpu()
+    both = (1 - (1 - onsets) * (1 - frames))
+    image = torch.stack([onsets, frames, both], dim=2).flip(0).mul(255).numpy()
+    image = Image.fromarray(image, 'RGB')
+    image = image.resize((image.size[0] * zoom, image.size[1] * zoom))
+    image.save(path)

@@ -18,6 +18,7 @@ def config():
     logdir = 'runs/' + datetime.now().strftime('%y%m%d-%H%M%S')
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     iterations = 100000
+    checkpoint_interval = 1000
 
     batch_size = 8
     sequence_length = SAMPLE_RATE * 2
@@ -26,7 +27,8 @@ def config():
 
 
 @ex.automain
-def train(logdir, device, iterations, batch_size, sequence_length):
+def train(logdir, device, iterations, checkpoint_interval,
+          batch_size, sequence_length):
     print_config(ex.current_run)
 
     os.makedirs(logdir, exist_ok=True)
@@ -66,5 +68,6 @@ def train(logdir, device, iterations, batch_size, sequence_length):
         writer.add_scalar('loss/frame', frame_loss.item(), global_step=i)
         writer.add_scalar('loss/velocity', velocity_loss.item(), global_step=i)
 
-        if i % 1000 == 0:
+        if i % checkpoint_interval == 0:
             torch.save(model, os.path.join(logdir, 'model-%d.pt' % i))
+            torch.save(optimizer, os.path.join(logdir, 'model-%d.optimizer.pt' % i))
