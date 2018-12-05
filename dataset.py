@@ -75,11 +75,6 @@ class PianoRollAudioDataset(Dataset):
 
     @classmethod
     @abstractmethod
-    def default_groups(cls):
-        raise NotImplementedError
-
-    @classmethod
-    @abstractmethod
     def available_groups(cls):
         """return the names of all available groups"""
         raise NotImplementedError
@@ -89,7 +84,6 @@ class PianoRollAudioDataset(Dataset):
         """return the list of input files (audio_filename, tsv_filename) for this group"""
         raise NotImplementedError
 
-    @abstractmethod
     def load(self, audio_path, tsv_path):
         """
         load an audio track and the corresponding labels
@@ -148,8 +142,8 @@ class PianoRollAudioDataset(Dataset):
 
 class Maestro(PianoRollAudioDataset):
 
-    def __init__(self, path='data/MAESTRO', groups=None, sequence_length=None):
-        super().__init__(path, groups if groups is not None else ['train'], sequence_length)
+    def __init__(self, path='data/MAESTRO', groups=None, sequence_length=None, device=DEFAULT_DEVICE):
+        super().__init__(path, groups if groups is not None else ['train'], sequence_length, device)
 
     @classmethod
     def available_groups(cls):
@@ -171,8 +165,8 @@ class Maestro(PianoRollAudioDataset):
 
 
 class MAPS(PianoRollAudioDataset):
-    def __init__(self, path='data/MAPS', groups=None, sequence_length=None):
-        super().__init__(path, groups if groups is not None else ['ENSTDkAm', 'ENSTDkCl'], sequence_length)
+    def __init__(self, path='data/MAPS', groups=None, sequence_length=None, device=DEFAULT_DEVICE):
+        super().__init__(path, groups if groups is not None else ['ENSTDkAm', 'ENSTDkCl'], sequence_length, device)
 
     @classmethod
     def available_groups(cls):

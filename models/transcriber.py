@@ -70,7 +70,11 @@ class FrameLoss(nn.Module):
 
 class VelocityLoss(nn.Module):
     def forward(self, velocity_pred, velocity_label, onset_label):
-        return (onset_label * (velocity_label - velocity_pred) ** 2).sum() / onset_label.sum()
+        denominator = onset_label.sum()
+        if denominator.item() == 0:
+            return denominator
+        else:
+            return (onset_label * (velocity_label - velocity_pred) ** 2).sum() / denominator
 
 
 class OnsetsAndFrames(nn.Module):
