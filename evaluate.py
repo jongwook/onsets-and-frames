@@ -14,7 +14,7 @@ from dataset import SAMPLE_RATE, HOP_LENGTH, MIN_MIDI
 from utils import summary, save_pianoroll, extract_notes, notes_to_frames
 
 
-def evaluate(model_file, dataset, sequence_length, save_piano_roll, device):
+def evaluate(model_file, dataset, sequence_length, save_piano_roll, onset_threshold, frame_threshold, device):
     sequence_length = sequence_length if device == 'cpu' or sequence_length is not None else SAMPLE_RATE * 20
     dataset_class = getattr(dataset_module, dataset)
     dataset = dataset_class(sequence_length=sequence_length, device=device)
@@ -61,7 +61,8 @@ def evaluate(model_file, dataset, sequence_length, save_piano_roll, device):
             save_pianoroll(pred_path, onset_pred, frame_pred)
 
         ref_pitches, ref_intervals, ref_velocities = extract_notes(onset_label, frame_label, velocity_label)
-        est_pitches, est_intervals, est_velocities = extract_notes(onset_pred, frame_pred, velocity_pred)
+        est_pitches, est_intervals, est_velocities = extract_notes(onset_pred, frame_pred, velocity_pred,
+                                                                   onset_threshold, frame_threshold)
 
         ref_time, ref_freqs = notes_to_frames(ref_pitches, ref_intervals, frame_label.shape)
         est_time, est_freqs = notes_to_frames(est_pitches, est_intervals, frame_pred.shape)
@@ -127,6 +128,8 @@ if __name__ == '__main__':
     parser.add_argument('dataset', nargs='?', default='MAPS')
     parser.add_argument('--save-piano-roll', default=None)
     parser.add_argument('--sequence-length', default=None, type=int)
+    parser.add_argument('--onset-threshold', default=0.5, type=float)
+    parser.add_argument('--frame-threshold', default=0.5, type=float)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
 
     with torch.no_grad():

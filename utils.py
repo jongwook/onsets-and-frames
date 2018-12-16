@@ -123,7 +123,7 @@ def save_pianoroll(path, onsets, frames, threshold=0.5, zoom=4):
     image.save(path)
 
 
-def extract_notes(onsets, frames, velocity, threshold=0.5):
+def extract_notes(onsets, frames, velocity, onset_threshold=0.5, frame_threshold=0.5):
     """
     Finds the note timings based on the onsets and frames information
 
@@ -140,8 +140,8 @@ def extract_notes(onsets, frames, velocity, threshold=0.5):
     intervals: list of (onset_index, offset_index)
     velocities: list of velocity values
     """
-    onsets = (onsets > threshold).cpu()
-    frames = (frames > threshold).cpu()
+    onsets = (onsets > onset_threshold).cpu()
+    frames = (frames > frame_threshold).cpu()
     onset_diff = torch.cat([onsets[:1, :], onsets[1:, :] - onsets[:-1, :]], dim=0).relu()
 
     pitches = []
