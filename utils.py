@@ -158,7 +158,7 @@ def extract_notes(onsets, frames, velocity, onset_threshold=0.5, frame_threshold
 
         while onsets[offset, pitch].item() or frames[offset, pitch].item():
             if onsets[offset, pitch].item():
-                velocity_samples.append(velocity[offset, pitch])
+                velocity_samples.append(velocity[offset, pitch].item())
             offset += 1
             if offset == onsets.shape[0]:
                 break

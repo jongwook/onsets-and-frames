@@ -14,10 +14,14 @@ from dataset import SAMPLE_RATE, HOP_LENGTH, MIN_MIDI
 from utils import summary, save_pianoroll, extract_notes, notes_to_frames
 
 
-def evaluate(model_file, dataset, sequence_length, save_piano_roll, onset_threshold, frame_threshold, device):
+def evaluate(model_file, dataset, dataset_group, sequence_length, save_piano_roll,
+             onset_threshold, frame_threshold, device):
     sequence_length = sequence_length if device == 'cpu' or sequence_length is not None else SAMPLE_RATE * 20
     dataset_class = getattr(dataset_module, dataset)
-    dataset = dataset_class(sequence_length=sequence_length, device=device)
+    kwargs = {'sequence_length': sequence_length, 'device': device}
+    if dataset_group is not None:
+        kwargs['groups'] = [dataset_group]
+    dataset = dataset_class(**kwargs)
 
     model = torch.load(model_file, map_location=device).eval()
     summary(model)
@@ -126,6 +130,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_file', type=str)
     parser.add_argument('dataset', nargs='?', default='MAPS')
+    parser.add_argument('dataset_group', nargs='?', default=None)
     parser.add_argument('--save-piano-roll', default=None)
     parser.add_argument('--sequence-length', default=None, type=int)
     parser.add_argument('--onset-threshold', default=0.5, type=float)
