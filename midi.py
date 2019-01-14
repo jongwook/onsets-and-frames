@@ -15,7 +15,8 @@ def parse_midi(path):
         time += message.time
 
         if 'note' in message.type:
-            note = dict(time=time, note=message.note, velocity=message.velocity)
+            velocity = message.velocity if message.type == 'note_on' else 0
+            note = dict(time=time, note=message.note, velocity=velocity)
             notes.append(note)
 
     rows = []

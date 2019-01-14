@@ -3,7 +3,6 @@ import os
 
 import numpy as np
 import torch
-from mir_eval.transcription_velocity import precision_recall_f1_overlap as evaluate_notes_with_velocity
 from mir_eval.multipitch import evaluate as evaluate_frames
 from mir_eval.transcription import precision_recall_f1_overlap as evaluate_notes
 from mir_eval.util import midi_to_hz
@@ -29,8 +28,6 @@ def evaluate(model_file, dataset, dataset_group, sequence_length, save_piano_rol
     losses = []
     note_metrics = []
     note_with_offset_metrics = []
-    note_with_velocity_metrics = []
-    note_with_offset_and_velocity_metrics = []
     frame_metrics = []
 
     loop = tqdm(dataset)
@@ -87,16 +84,6 @@ def evaluate(model_file, dataset, dataset_group, sequence_length, save_piano_rol
         p, r, f, o = evaluate_notes(ref_intervals, ref_pitches, est_intervals, est_pitches)
         note_with_offset_metrics.append(dict(Precision=p, Recall=r, F1=f, Overlap=o))
 
-        p, r, f, o = evaluate_notes_with_velocity(ref_intervals, ref_pitches, ref_velocities,
-                                                  est_intervals, est_pitches, est_velocities,
-                                                  offset_ratio=None, velocity_tolerance=0.1)
-        note_with_velocity_metrics.append(dict(Precision=p, Recall=r, F1=f, Overlap=o))
-
-        p, r, f, o = evaluate_notes_with_velocity(ref_intervals, ref_pitches, ref_velocities,
-                                                  est_intervals, est_pitches, est_velocities,
-                                                  velocity_tolerance=0.1)
-        note_with_offset_and_velocity_metrics.append(dict(Precision=p, Recall=r, F1=f, Overlap=o))
-
         metrics = evaluate_frames(ref_time, ref_freqs, est_time, est_freqs)
         frame_metrics.append(metrics)
 
@@ -108,16 +95,6 @@ def evaluate(model_file, dataset, dataset_group, sequence_length, save_piano_rol
     print('\nNote with offset metrics:\n')
     for key in note_with_offset_metrics[0].keys():
         metrics = [m[key] for m in note_with_offset_metrics]
-        print('%30s: %.3f ± %.3f' % (key, np.mean(metrics), np.std(metrics)))
-
-    print('\nNote with velocity metrics:\n')
-    for key in note_with_velocity_metrics[0].keys():
-        metrics = [m[key] for m in note_with_velocity_metrics]
-        print('%30s: %.3f ± %.3f' % (key, np.mean(metrics), np.std(metrics)))
-
-    print('\nNote with offset & velocity metrics:\n')
-    for key in note_with_offset_and_velocity_metrics[0].keys():
-        metrics = [m[key] for m in note_with_offset_and_velocity_metrics]
         print('%30s: %.3f ± %.3f' % (key, np.mean(metrics), np.std(metrics)))
 
     print('\nFrame metrics:\n')
