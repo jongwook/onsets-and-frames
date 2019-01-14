@@ -15,7 +15,7 @@ from midi import parse_midi
 DEFAULT_DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 SAMPLE_RATE = 16000
-HOP_LENGTH = SAMPLE_RATE * 8 // 1000
+HOP_LENGTH = SAMPLE_RATE * 32 // 1000
 ONSET_LENGTH = SAMPLE_RATE * 32 // 1000
 HOPS_IN_ONSET = ONSET_LENGTH // HOP_LENGTH
 MIN_MIDI = 21

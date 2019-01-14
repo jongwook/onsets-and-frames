@@ -63,7 +63,7 @@ class OnsetLoss(nn.Module):
 
 class FrameLoss(nn.Module):
     def forward(self, frame_pred, frame_label, ramp_label):
-        weights = 5.0 / ((ramp_label + 3.0) / 4.0)
+        weights = 5.0 / ramp_label
         weights[weights == inf] = 1.0
         return F.binary_cross_entropy(frame_pred, frame_label, weight=weights)
 

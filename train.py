@@ -21,7 +21,7 @@ def config():
     checkpoint_interval = 1000
 
     batch_size = 8
-    sequence_length = SAMPLE_RATE * 2
+    sequence_length = 32768
 
     ex.observers.append(FileStorageObserver.create(logdir))
 
