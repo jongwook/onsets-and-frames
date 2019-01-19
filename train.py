@@ -70,4 +70,4 @@ def train(logdir, device, iterations, checkpoint_interval,
 
         if i % checkpoint_interval == 0:
             torch.save(model, os.path.join(logdir, 'model-%d.pt' % i))
-            torch.save(optimizer, os.path.join(logdir, 'model-%d.optimizer.pt' % i))
+            torch.save(optimizer, os.path.join(logdir, 'last.optimizer.pt'))
