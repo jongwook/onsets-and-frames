@@ -3,20 +3,19 @@ import os
 
 import numpy as np
 import torch
-from mir_eval.transcription_velocity import precision_recall_f1_overlap as evaluate_notes_with_velocity
 from mir_eval.multipitch import evaluate as evaluate_frames
 from mir_eval.transcription import precision_recall_f1_overlap as evaluate_notes
+from mir_eval.transcription_velocity import precision_recall_f1_overlap as evaluate_notes_with_velocity
 from mir_eval.util import midi_to_hz
 from tqdm import tqdm
 
 import dataset as dataset_module
-from dataset import SAMPLE_RATE, HOP_LENGTH, MIN_MIDI
-from utils import summary, save_pianoroll, extract_notes, notes_to_frames
+from dataset import HOP_LENGTH, MIN_MIDI, SAMPLE_RATE
+from utils import summary, save_pianoroll, save_midi, extract_notes, notes_to_frames
 
 
-def evaluate(model_file, dataset, dataset_group, sequence_length, save_piano_roll,
+def evaluate(model_file, dataset, dataset_group, sequence_length, save_path,
              onset_threshold, frame_threshold, device):
-    # sequence_length = sequence_length if device == 'cpu' or sequence_length is not None else SAMPLE_RATE * 20
     dataset_class = getattr(dataset_module, dataset)
     kwargs = {'sequence_length': sequence_length, 'device': device}
     if dataset_group is not None:
@@ -55,14 +54,7 @@ def evaluate(model_file, dataset, dataset_group, sequence_length, save_piano_rol
         velocity_label = velocity_label.squeeze(0)
         onset_pred = onset_pred.squeeze(0)
         frame_pred = frame_pred.squeeze(0)
-        velocity_pred = velocity_pred.squeeze(0)
-
-        if save_piano_roll is not None:
-            os.makedirs(save_piano_roll, exist_ok=True)
-            label_path = os.path.join(save_piano_roll, os.path.basename(data['path']) + '.label.png')
-            save_pianoroll(label_path, onset_label, frame_label)
-            pred_path = os.path.join(save_piano_roll, os.path.basename(data['path']) + '.pred.png')
-            save_pianoroll(pred_path, onset_pred, frame_pred)
+        velocity_pred = velocity_pred.squeeze(0).relu_()
 
         ref_pitches, ref_intervals, ref_velocities = extract_notes(onset_label, frame_label, velocity_label)
         est_pitches, est_intervals, est_velocities = extract_notes(onset_pred, frame_pred, velocity_pred,
@@ -71,15 +63,25 @@ def evaluate(model_file, dataset, dataset_group, sequence_length, save_piano_rol
         ref_time, ref_freqs = notes_to_frames(ref_pitches, ref_intervals, frame_label.shape)
         est_time, est_freqs = notes_to_frames(est_pitches, est_intervals, frame_pred.shape)
 
-        ref_intervals = np.array([[onset / HOP_LENGTH, offset / HOP_LENGTH] for onset, offset in ref_intervals])
+        scaling_factor = HOP_LENGTH / SAMPLE_RATE
+        ref_intervals = np.array([[onset * scaling_factor, offset * scaling_factor] for onset, offset in ref_intervals])
         ref_pitches = np.array([midi_to_hz(MIN_MIDI + midi) for midi in ref_pitches])
-        est_intervals = np.array([[onset / HOP_LENGTH, offset / HOP_LENGTH] for onset, offset in est_intervals])
+        est_intervals = np.array([[onset * scaling_factor, offset * scaling_factor] for onset, offset in est_intervals])
         est_pitches = np.array([midi_to_hz(MIN_MIDI + midi) for midi in est_pitches])
 
-        ref_time = np.array([time / HOP_LENGTH for time in ref_time])
+        ref_time = np.array([time * scaling_factor for time in ref_time])
         ref_freqs = [np.array([midi_to_hz(MIN_MIDI + midi) for midi in freqs]) for freqs in ref_freqs]
-        est_time = np.array([time / HOP_LENGTH for time in est_time])
+        est_time = np.array([time * scaling_factor for time in est_time])
         est_freqs = [np.array([midi_to_hz(MIN_MIDI + midi) for midi in freqs]) for freqs in est_freqs]
+
+        if save_path is not None:
+            os.makedirs(save_path, exist_ok=True)
+            label_path = os.path.join(save_path, os.path.basename(data['path']) + '.label.png')
+            save_pianoroll(label_path, onset_label, frame_label)
+            pred_path = os.path.join(save_path, os.path.basename(data['path']) + '.pred.png')
+            save_pianoroll(pred_path, onset_pred, frame_pred)
+            midi_path = os.path.join(save_path, os.path.basename(data['path']) + '.pred.mid')
+            save_midi(midi_path, est_pitches, est_intervals, est_velocities)
 
         p, r, f, o = evaluate_notes(ref_intervals, ref_pitches, est_intervals, est_pitches, offset_ratio=None)
         note_metrics.append(dict(Precision=p, Recall=r, F1=f, Overlap=o))
@@ -131,7 +133,7 @@ if __name__ == '__main__':
     parser.add_argument('model_file', type=str)
     parser.add_argument('dataset', nargs='?', default='MAPS')
     parser.add_argument('dataset_group', nargs='?', default=None)
-    parser.add_argument('--save-piano-roll', default=None)
+    parser.add_argument('--save-path', default=None)
     parser.add_argument('--sequence-length', default=None, type=int)
     parser.add_argument('--onset-threshold', default=0.5, type=float)
     parser.add_argument('--frame-threshold', default=0.5, type=float)

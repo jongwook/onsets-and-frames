@@ -1,10 +1,12 @@
 import sys
 from functools import reduce
 
-from torch.nn.modules.module import _addindent
-import torch
 import numpy as np
+import torch
 from PIL import Image
+from mido import Message, MidiFile, MidiTrack
+from mir_eval.util import hz_to_midi
+from torch.nn.modules.module import _addindent
 
 
 def summary(model, file=sys.stdout):
@@ -102,7 +104,7 @@ def cycle(iterable):
             yield item
 
 
-def save_pianoroll(path, onsets, frames, threshold=0.5, zoom=4):
+def save_pianoroll(path, onsets, frames, onset_threshold=0.5, frame_threshold=0.5, zoom=4):
     """
     Saves a piano roll diagram
 
@@ -114,13 +116,47 @@ def save_pianoroll(path, onsets, frames, threshold=0.5, zoom=4):
     threshold: float
     zoom: int
     """
-    onsets = (1 - (onsets.t() > threshold)).cpu()
-    frames = (1 - (frames.t() > threshold)).cpu()
+    onsets = (1 - (onsets.t() > onset_threshold)).cpu()
+    frames = (1 - (frames.t() > frame_threshold)).cpu()
     both = (1 - (1 - onsets) * (1 - frames))
     image = torch.stack([onsets, frames, both], dim=2).flip(0).mul(255).numpy()
     image = Image.fromarray(image, 'RGB')
     image = image.resize((image.size[0], image.size[1] * zoom))
     image.save(path)
+
+
+def save_midi(path, pitches, intervals, velocities):
+    """
+    Save extracted notes as a MIDI file
+    Parameters
+    ----------
+    path: the path to save the MIDI file
+    pitches: np.ndarray of bin_indices
+    intervals: list of (onset_index, offset_index)
+    velocities: list of velocity values
+    """
+    file = MidiFile()
+    track = MidiTrack()
+    file.tracks.append(track)
+    ticks_per_second = file.ticks_per_beat * 2.0
+
+    events = []
+    for i in range(len(pitches)):
+        events.append(dict(type='on', pitch=pitches[i], time=intervals[i][0], velocity=velocities[i]))
+        events.append(dict(type='off', pitch=pitches[i], time=intervals[i][1], velocity=velocities[i]))
+    events.sort(key=lambda row: row['time'])
+
+    last_tick = 0
+    for event in events:
+        current_tick = int(event['time'] * ticks_per_second)
+        velocity = int(event['velocity'] * 127)
+        if velocity > 127:
+            velocity = 127
+        pitch = int(round(hz_to_midi(event['pitch'])))
+        track.append(Message('note_' + event['type'], note=pitch, velocity=velocity, time=current_tick - last_tick))
+        last_tick = current_tick
+
+    file.save(path)
 
 
 def extract_notes(onsets, frames, velocity, onset_threshold=0.5, frame_threshold=0.5):
@@ -136,9 +172,9 @@ def extract_notes(onsets, frames, velocity, onset_threshold=0.5, frame_threshold
 
     Returns
     -------
-    pitches: list of bin_indices
+    pitches: np.ndarray of bin_indices
     intervals: list of (onset_index, offset_index)
-    velocities: list of velocity values
+    velocities: np.ndarray of velocity values
     """
     onsets = (onsets > onset_threshold).cpu()
     frames = (frames > frame_threshold).cpu()
