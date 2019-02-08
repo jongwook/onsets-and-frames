@@ -4,6 +4,8 @@ This is a [PyTorch](https://pytorch.org/) implementation of Google's [Onsets and
 
 ## Instructions
 
+This project is quite resource-intensive; 32 GB or larger system memory and 8 GB or larger GPU memory is recommended. 
+
 ### Downloading Dataset
 
 The `data` subdirectory already contains the MAPS database. To download the Maestro dataset, first make sure that you have `ffmpeg` executable and run `prepare_maestro.sh` script:
@@ -53,7 +55,21 @@ In order to test on the Maestro dataset's test split instead of the MAPS databas
 python evaluate.py runs/model/model-100000.pt Maestro test
 ```
 
-## Known issues
+## Implementation Details
 
-The current implementation produces on-par performance on onset predictions, but its frame prediction performance is far worse and is under investigation.
+This implementation contains a few of the additional improvements on the model that were reported in the Maestro paper, including:
+
+* Offset head
+* Increased model capacity, making it 26M parameters by default
+* Gradient stopping of inter-stack connections
+* L2 Gradient clipping of each parameter at 3
+* Using the HTK mel frequencies
+
+Meanwhile, this implementation does not include the following features:
+
+* Variable-length input sequences that slices at silence or zero crossings
+* Harmonically decaying weights on the frame loss
+
+Despite these, this implementation is able to achieve a comparable performance to what is reported on the Maestro paper as the performance without data augmentation.
+
 
