@@ -1,21 +1,98 @@
 import argparse
 import os
+import sys
+from collections import defaultdict
 
 import numpy as np
-import torch
 from mir_eval.multipitch import evaluate as evaluate_frames
 from mir_eval.transcription import precision_recall_f1_overlap as evaluate_notes
 from mir_eval.transcription_velocity import precision_recall_f1_overlap as evaluate_notes_with_velocity
 from mir_eval.util import midi_to_hz
+from scipy.stats import hmean
 from tqdm import tqdm
 
-import dataset as dataset_module
-from dataset import HOP_LENGTH, MIN_MIDI, SAMPLE_RATE
-from utils import summary, save_pianoroll, save_midi, extract_notes, notes_to_frames
+import onsets_and_frames.dataset as dataset_module
+from onsets_and_frames import *
+
+eps = sys.float_info.epsilon
 
 
-def evaluate(model_file, dataset, dataset_group, sequence_length, save_path,
-             onset_threshold, frame_threshold, device):
+def evaluate(data, model, onset_threshold=0.5, frame_threshold=0.5, save_path=None):
+    metrics = defaultdict(list)
+
+    for label in data:
+        mel = melspectrogram(label['audio'].reshape(-1, label['audio'].shape[-1])[:, :-1]).transpose(-1, -2)
+        pred, losses = model.run_on_batch(label, mel)
+
+        for key, loss in losses.items():
+            metrics[key].append(loss.item())
+
+        for key, value in pred.items():
+            value.squeeze_(0).relu_()
+
+        p_ref, i_ref, v_ref = extract_notes(label['onset'], label['frame'], label['velocity'])
+        p_est, i_est, v_est = extract_notes(pred['onset'], pred['frame'], pred['velocity'], onset_threshold, frame_threshold)
+
+        t_ref, f_ref = notes_to_frames(p_ref, i_ref, label['frame'].shape)
+        t_est, f_est = notes_to_frames(p_est, i_est, pred['frame'].shape)
+
+        scaling = HOP_LENGTH / SAMPLE_RATE
+
+        i_ref = (i_ref * scaling).reshape(-1, 2)
+        p_ref = np.array([midi_to_hz(MIN_MIDI + midi) for midi in p_ref])
+        i_est = (i_est * scaling).reshape(-1, 2)
+        p_est = np.array([midi_to_hz(MIN_MIDI + midi) for midi in p_est])
+
+        t_ref = t_ref.astype(np.float64) * scaling
+        f_ref = [np.array([midi_to_hz(MIN_MIDI + midi) for midi in freqs]) for freqs in f_ref]
+        t_est = t_est.astype(np.float64) * scaling
+        f_est = [np.array([midi_to_hz(MIN_MIDI + midi) for midi in freqs]) for freqs in f_est]
+
+        p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, offset_ratio=None)
+        metrics['metric/note/precision'].append(p)
+        metrics['metric/note/recall'].append(r)
+        metrics['metric/note/f1'].append(f)
+        metrics['metric/note/overlap'].append(o)
+
+        p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est)
+        metrics['metric/note-with-offsets/precision'].append(p)
+        metrics['metric/note-with-offsets/recall'].append(r)
+        metrics['metric/note-with-offsets/f1'].append(f)
+        metrics['metric/note-with-offsets/overlap'].append(o)
+
+        p, r, f, o = evaluate_notes_with_velocity(i_ref, p_ref, v_ref, i_est, p_est, v_est,
+                                                  offset_ratio=None, velocity_tolerance=0.1)
+        metrics['metric/note-with-velocity/precision'].append(p)
+        metrics['metric/note-with-velocity/recall'].append(r)
+        metrics['metric/note-with-velocity/f1'].append(f)
+        metrics['metric/note-with-velocity/overlap'].append(o)
+
+        p, r, f, o = evaluate_notes_with_velocity(i_ref, p_ref, v_ref, i_est, p_est, v_est, velocity_tolerance=0.1)
+        metrics['metric/note-with-offsets-and-velocity/precision'].append(p)
+        metrics['metric/note-with-offsets-and-velocity/recall'].append(r)
+        metrics['metric/note-with-offsets-and-velocity/f1'].append(f)
+        metrics['metric/note-with-offsets-and-velocity/overlap'].append(o)
+
+        frame_metrics = evaluate_frames(t_ref, f_ref, t_est, f_est)
+        metrics['metric/frame/f1'] = hmean([frame_metrics['Precision'] + eps, frame_metrics['Recall'] + eps]) - eps
+
+        for key, loss in frame_metrics.items():
+            metrics['metric/frame/' + key.lower().replace(' ', '_')].append(loss)
+
+        if save_path is not None:
+            os.makedirs(save_path, exist_ok=True)
+            label_path = os.path.join(save_path, os.path.basename(label['path']) + '.label.png')
+            save_pianoroll(label_path, label['onset'], label['frame'])
+            pred_path = os.path.join(save_path, os.path.basename(label['path']) + '.pred.png')
+            save_pianoroll(pred_path, pred['onset'], pred['frame'])
+            midi_path = os.path.join(save_path, os.path.basename(label['path']) + '.pred.mid')
+            save_midi(midi_path, p_est, i_est, v_est)
+
+    return metrics
+
+
+def evaluate_file(model_file, dataset, dataset_group, sequence_length, save_path,
+                  onset_threshold, frame_threshold, device):
     dataset_class = getattr(dataset_module, dataset)
     kwargs = {'sequence_length': sequence_length, 'device': device}
     if dataset_group is not None:
@@ -25,107 +102,12 @@ def evaluate(model_file, dataset, dataset_group, sequence_length, save_path,
     model = torch.load(model_file, map_location=device).eval()
     summary(model)
 
-    losses = []
-    note_metrics = []
-    note_with_offset_metrics = []
-    note_with_velocity_metrics = []
-    note_with_offset_and_velocity_metrics = []
-    frame_metrics = []
+    metrics = evaluate(tqdm(dataset), model, onset_threshold, frame_threshold, save_path)
 
-    loop = tqdm(dataset)
-
-    for data in loop:
-        audio_label = data['audio'].unsqueeze(0)
-        onset_label = data['onsets'].unsqueeze(0)
-        frame_label = data['frames'].unsqueeze(0)
-        velocity_label = data['velocities'].unsqueeze(0)
-        ramp_label = data['ramps'].unsqueeze(0)
-        mel_label = dataset.mel(audio_label[:, :-1]).transpose(-1, -2)
-
-        onset_pred, frame_pred, velocity_pred = model(mel_label)
-        onset_loss = model.onset_loss(onset_pred, onset_label)
-        frame_loss = model.frame_loss(frame_pred, frame_label, ramp_label)
-        velocity_loss = model.velocity_loss(velocity_pred, velocity_label, onset_label)
-        loss = onset_loss + frame_loss + velocity_loss
-        losses.append(dict(Lo=onset_loss.item(), Lf=frame_loss.item(), Lv=velocity_loss.item(), loss=loss.item()))
-
-        onset_label = onset_label.squeeze(0)
-        frame_label = frame_label.squeeze(0)
-        velocity_label = velocity_label.squeeze(0)
-        onset_pred = onset_pred.squeeze(0)
-        frame_pred = frame_pred.squeeze(0)
-        velocity_pred = velocity_pred.squeeze(0).relu_()
-
-        ref_pitches, ref_intervals, ref_velocities = extract_notes(onset_label, frame_label, velocity_label)
-        est_pitches, est_intervals, est_velocities = extract_notes(onset_pred, frame_pred, velocity_pred,
-                                                                   onset_threshold, frame_threshold)
-
-        ref_time, ref_freqs = notes_to_frames(ref_pitches, ref_intervals, frame_label.shape)
-        est_time, est_freqs = notes_to_frames(est_pitches, est_intervals, frame_pred.shape)
-
-        scaling_factor = HOP_LENGTH / SAMPLE_RATE
-        ref_intervals = np.array([[onset * scaling_factor, offset * scaling_factor] for onset, offset in ref_intervals])
-        ref_pitches = np.array([midi_to_hz(MIN_MIDI + midi) for midi in ref_pitches])
-        est_intervals = np.array([[onset * scaling_factor, offset * scaling_factor] for onset, offset in est_intervals])
-        est_pitches = np.array([midi_to_hz(MIN_MIDI + midi) for midi in est_pitches])
-
-        ref_time = np.array([time * scaling_factor for time in ref_time])
-        ref_freqs = [np.array([midi_to_hz(MIN_MIDI + midi) for midi in freqs]) for freqs in ref_freqs]
-        est_time = np.array([time * scaling_factor for time in est_time])
-        est_freqs = [np.array([midi_to_hz(MIN_MIDI + midi) for midi in freqs]) for freqs in est_freqs]
-
-        if save_path is not None:
-            os.makedirs(save_path, exist_ok=True)
-            label_path = os.path.join(save_path, os.path.basename(data['path']) + '.label.png')
-            save_pianoroll(label_path, onset_label, frame_label)
-            pred_path = os.path.join(save_path, os.path.basename(data['path']) + '.pred.png')
-            save_pianoroll(pred_path, onset_pred, frame_pred)
-            midi_path = os.path.join(save_path, os.path.basename(data['path']) + '.pred.mid')
-            save_midi(midi_path, est_pitches, est_intervals, est_velocities)
-
-        p, r, f, o = evaluate_notes(ref_intervals, ref_pitches, est_intervals, est_pitches, offset_ratio=None)
-        note_metrics.append(dict(Precision=p, Recall=r, F1=f, Overlap=o))
-
-        p, r, f, o = evaluate_notes(ref_intervals, ref_pitches, est_intervals, est_pitches)
-        note_with_offset_metrics.append(dict(Precision=p, Recall=r, F1=f, Overlap=o))
-
-        p, r, f, o = evaluate_notes_with_velocity(ref_intervals, ref_pitches, ref_velocities,
-                                                  est_intervals, est_pitches, est_velocities,
-                                                  offset_ratio=None, velocity_tolerance=0.1)
-        note_with_velocity_metrics.append(dict(Precision=p, Recall=r, F1=f, Overlap=o))
-
-        p, r, f, o = evaluate_notes_with_velocity(ref_intervals, ref_pitches, ref_velocities,
-                                                  est_intervals, est_pitches, est_velocities,
-                                                  velocity_tolerance=0.1)
-        note_with_offset_and_velocity_metrics.append(dict(Precision=p, Recall=r, F1=f, Overlap=o))
-
-        metrics = evaluate_frames(ref_time, ref_freqs, est_time, est_freqs)
-        frame_metrics.append(metrics)
-
-    print('\nNote metrics:\n')
-    for key in note_metrics[0].keys():
-        metrics = [m[key] for m in note_metrics]
-        print('%30s: %.3f ± %.3f' % (key, np.mean(metrics), np.std(metrics)))
-
-    print('\nNote with offset metrics:\n')
-    for key in note_with_offset_metrics[0].keys():
-        metrics = [m[key] for m in note_with_offset_metrics]
-        print('%30s: %.3f ± %.3f' % (key, np.mean(metrics), np.std(metrics)))
-
-    print('\nNote with velocity metrics:\n')
-    for key in note_with_velocity_metrics[0].keys():
-        metrics = [m[key] for m in note_with_velocity_metrics]
-        print('%30s: %.3f ± %.3f' % (key, np.mean(metrics), np.std(metrics)))
-
-    print('\nNote with offset & velocity metrics:\n')
-    for key in note_with_offset_and_velocity_metrics[0].keys():
-        metrics = [m[key] for m in note_with_offset_and_velocity_metrics]
-        print('%30s: %.3f ± %.3f' % (key, np.mean(metrics), np.std(metrics)))
-
-    print('\nFrame metrics:\n')
-    for key in frame_metrics[0].keys():
-        metrics = [m[key] for m in frame_metrics]
-        print('%30s: %.3f ± %.3f' % (key, np.mean(metrics), np.std(metrics)))
+    for key, values in metrics.items():
+        if key.startswith('metric/'):
+            _, category, name = key.split('/')
+            print(f'{category:>32} {name:25}: {np.mean(values):.3f} ± {np.std(values):.3f}')
 
 
 if __name__ == '__main__':
@@ -140,4 +122,4 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
 
     with torch.no_grad():
-        evaluate(**vars(parser.parse_args()))
+        evaluate_file(**vars(parser.parse_args()))

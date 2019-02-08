@@ -1,10 +1,11 @@
 import numpy as np
-import torch
 import torch.nn.functional as F
 from librosa.filters import mel
 from librosa.util import pad_center
 from scipy.signal import get_window
 from torch.autograd import Variable
+
+from .constants import *
 
 
 class STFT(torch.nn.Module):
@@ -73,10 +74,7 @@ class MelSpectrogram(torch.nn.Module):
         super(MelSpectrogram, self).__init__()
         self.stft = STFT(filter_length, hop_length, win_length)
 
-        if mel_fmax is None:
-            mel_fmax = sample_rate // 2
-
-        mel_basis = mel(sample_rate, filter_length, n_mels, mel_fmin, mel_fmax)
+        mel_basis = mel(sample_rate, filter_length, n_mels, mel_fmin, mel_fmax, htk=True)
         mel_basis = torch.from_numpy(mel_basis).float()
         self.register_buffer('mel_basis', mel_basis)
 
@@ -97,3 +95,8 @@ class MelSpectrogram(torch.nn.Module):
         mel_output = torch.matmul(self.mel_basis, magnitudes)
         mel_output = torch.log(torch.clamp(mel_output, min=1e-5))
         return mel_output
+
+
+# the default melspectrogram converter across the project
+melspectrogram = MelSpectrogram(N_MELS, SAMPLE_RATE, WINDOW_LENGTH, HOP_LENGTH, mel_fmin=MEL_FMIN, mel_fmax=MEL_FMAX)
+melspectrogram.to(DEFAULT_DEVICE)
