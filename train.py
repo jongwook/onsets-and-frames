@@ -32,15 +32,17 @@ def config():
     if torch.cuda.is_available() and torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory < 10e9:
         batch_size //= 2
         sequence_length //= 2
-        print(f'Halving batch size to {batch_size} and sequence_length to {sequence_length} to save memory')
+        print(f'Reducing batch size to {batch_size} and sequence_length to {sequence_length} to save memory')
 
     learning_rate = 0.0006
     learning_rate_decay_steps = 10000
     learning_rate_decay_rate = 0.98
 
+    leave_one_out = None
+
     clip_gradient_norm = 3
 
-    validation_length = 320000
+    validation_length = sequence_length
     validation_interval = 500
 
     ex.observers.append(FileStorageObserver.create(logdir))
@@ -48,17 +50,24 @@ def config():
 
 @ex.automain
 def train(logdir, device, iterations, resume_iteration, checkpoint_interval, batch_size, sequence_length,
-          model_complexity, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate, clip_gradient_norm,
-          validation_length, validation_interval):
+          model_complexity, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate, leave_one_out,
+          clip_gradient_norm, validation_length, validation_interval):
     print_config(ex.current_run)
 
     os.makedirs(logdir, exist_ok=True)
     writer = SummaryWriter(logdir)
 
-    dataset = MAESTRO(sequence_length=sequence_length)
+    train_groups, validation_groups = ['train'], ['validation']
+
+    if leave_one_out is not None:
+        all_years = {'2004', '2006', '2008', '2009', '2011', '2013', '2014', '2015', '2017'}
+        train_groups = list(all_years - {str(leave_one_out)})
+        validation_groups = [str(leave_one_out)]
+
+    dataset = MAESTRO(groups=train_groups, sequence_length=sequence_length)
     loader = DataLoader(dataset, batch_size, shuffle=True)
 
-    validation_dataset = MAESTRO(groups=['validation'], sequence_length=validation_length)
+    validation_dataset = MAESTRO(groups=validation_groups, sequence_length=validation_length)
 
     if resume_iteration is None:
         model = OnsetsAndFrames(N_MELS, MAX_MIDI - MIN_MIDI + 1, model_complexity).to(device)
@@ -76,9 +85,7 @@ def train(logdir, device, iterations, resume_iteration, checkpoint_interval, bat
     loop = tqdm(range(resume_iteration + 1, iterations + 1))
     for i, batch in zip(loop, cycle(loader)):
         scheduler.step()
-
-        mel = melspectrogram(batch['audio'].reshape(-1, batch['audio'].shape[-1])[:, :-1]).transpose(-1, -2)
-        predictions, losses = model.run_on_batch(batch, mel)
+        predictions, losses = model.run_on_batch(batch)
 
         loss = sum(losses.values())
         optimizer.zero_grad()
@@ -86,8 +93,7 @@ def train(logdir, device, iterations, resume_iteration, checkpoint_interval, bat
         optimizer.step()
 
         if clip_gradient_norm:
-            for parameter in model.parameters():
-                clip_grad_norm_([parameter], clip_gradient_norm)
+            clip_grad_norm_(model.parameters(), clip_gradient_norm)
 
         for key, value in {'loss': loss, **losses}.items():
             writer.add_scalar(key, value.item(), global_step=i)

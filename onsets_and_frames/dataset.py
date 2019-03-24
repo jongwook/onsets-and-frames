@@ -16,7 +16,6 @@ class PianoRollAudioDataset(Dataset):
     def __init__(self, path, groups=None, sequence_length=None, seed=42, device=DEFAULT_DEVICE):
         self.path = path
         self.groups = groups if groups is not None else self.available_groups()
-        assert all(group in self.available_groups() for group in self.groups)
         self.sequence_length = sequence_length
         self.device = device
         self.random = np.random.RandomState(seed)
@@ -134,11 +133,22 @@ class MAESTRO(PianoRollAudioDataset):
         return ['train', 'validation', 'test']
 
     def files(self, group):
-        metadata = json.load(open(os.path.join(self.path, 'maestro-v1.0.0.json')))
-        files = sorted([(os.path.join(self.path, row['audio_filename'].replace('.wav', '.flac')),
-                         os.path.join(self.path, row['midi_filename'])) for row in metadata if row['split'] == group])
+        if group not in self.available_groups():
+            # year-based grouping
+            flacs = sorted(glob(os.path.join(self.path, group, '*.flac')))
+            if len(flacs) == 0:
+                flacs = sorted(glob(os.path.join(self.path, group, '*.wav')))
 
-        files = [(audio if os.path.exists(audio) else audio.replace('.flac', '.wav'), midi) for audio, midi in files]
+            midis = sorted(glob(os.path.join(self.path, group, '*.midi')))
+            files = list(zip(flacs, midis))
+            if len(files) == 0:
+                raise RuntimeError(f'Group {group} is empty')
+        else:
+            metadata = json.load(open(os.path.join(self.path, 'maestro-v1.0.0.json')))
+            files = sorted([(os.path.join(self.path, row['audio_filename'].replace('.wav', '.flac')),
+                             os.path.join(self.path, row['midi_filename'])) for row in metadata if row['split'] == group])
+
+            files = [(audio if os.path.exists(audio) else audio.replace('.flac', '.wav'), midi) for audio, midi in files]
 
         result = []
         for audio_path, midi_path in files:

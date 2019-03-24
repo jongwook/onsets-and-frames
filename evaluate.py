@@ -21,8 +21,7 @@ def evaluate(data, model, onset_threshold=0.5, frame_threshold=0.5, save_path=No
     metrics = defaultdict(list)
 
     for label in data:
-        mel = melspectrogram(label['audio'].reshape(-1, label['audio'].shape[-1])[:, :-1]).transpose(-1, -2)
-        pred, losses = model.run_on_batch(label, mel)
+        pred, losses = model.run_on_batch(label)
 
         for key, loss in losses.items():
             metrics[key].append(loss.item())
@@ -74,7 +73,7 @@ def evaluate(data, model, onset_threshold=0.5, frame_threshold=0.5, save_path=No
         metrics['metric/note-with-offsets-and-velocity/overlap'].append(o)
 
         frame_metrics = evaluate_frames(t_ref, f_ref, t_est, f_est)
-        metrics['metric/frame/f1'] = hmean([frame_metrics['Precision'] + eps, frame_metrics['Recall'] + eps]) - eps
+        metrics['metric/frame/f1'].append(hmean([frame_metrics['Precision'] + eps, frame_metrics['Recall'] + eps]) - eps)
 
         for key, loss in frame_metrics.items():
             metrics['metric/frame/' + key.lower().replace(' ', '_')].append(loss)

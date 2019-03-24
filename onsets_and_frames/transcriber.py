@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from .lstm import BiLSTM
+from .mel import melspectrogram
 
 
 class ConvStack(nn.Module):
@@ -52,34 +53,34 @@ class OnsetsAndFrames(nn.Module):
     def __init__(self, input_features, output_features, model_complexity=48):
         super().__init__()
 
-        fc_size = model_complexity * 16
-        lstm_units = model_complexity * 8
+        model_size = model_complexity * 16
+        sequence_model = lambda input_size, output_size: BiLSTM(input_size, output_size // 2)
 
         self.onset_stack = nn.Sequential(
-            ConvStack(input_features, fc_size),
-            BiLSTM(fc_size, lstm_units),
-            nn.Linear(lstm_units * 2, output_features),
+            ConvStack(input_features, model_size),
+            sequence_model(model_size, model_size),
+            nn.Linear(model_size, output_features),
             nn.Sigmoid()
         )
         self.offset_stack = nn.Sequential(
-            ConvStack(input_features, fc_size),
-            BiLSTM(fc_size, lstm_units),
-            nn.Linear(lstm_units * 2, output_features),
+            ConvStack(input_features, model_size),
+            sequence_model(model_size, model_size),
+            nn.Linear(model_size, output_features),
             nn.Sigmoid()
         )
         self.frame_stack = nn.Sequential(
-            ConvStack(input_features, fc_size),
-            nn.Linear(fc_size, output_features),
+            ConvStack(input_features, model_size),
+            nn.Linear(model_size, output_features),
             nn.Sigmoid()
         )
         self.combined_stack = nn.Sequential(
-            BiLSTM(output_features * 3, lstm_units),
-            nn.Linear(lstm_units * 2, output_features),
+            sequence_model(output_features * 3, model_size),
+            nn.Linear(model_size, output_features),
             nn.Sigmoid()
         )
         self.velocity_stack = nn.Sequential(
-            ConvStack(input_features, fc_size),
-            nn.Linear(fc_size, output_features)
+            ConvStack(input_features, model_size),
+            nn.Linear(model_size, output_features)
         )
 
     def forward(self, mel):
@@ -91,13 +92,14 @@ class OnsetsAndFrames(nn.Module):
         velocity_pred = self.velocity_stack(mel)
         return onset_pred, offset_pred, activation_pred, frame_pred, velocity_pred
 
-    def run_on_batch(self, batch, mel):
+    def run_on_batch(self, batch):
         audio_label = batch['audio']
         onset_label = batch['onset']
         offset_label = batch['offset']
         frame_label = batch['frame']
         velocity_label = batch['velocity']
 
+        mel = melspectrogram(audio_label.reshape(-1, audio_label.shape[-1])[:, :-1]).transpose(-1, -2)
         onset_pred, offset_pred, _, frame_pred, velocity_pred = self(mel)
 
         predictions = {
