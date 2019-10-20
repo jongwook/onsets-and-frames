@@ -88,7 +88,7 @@ if __name__ == '__main__':
 
     def process(input_file, output_file):
         midi_data = parse_midi(input_file)
-        np.savetxt(output_file, midi_data, '%.6f', '\t', header='onset,offset,note,velocity')
+        np.savetxt(output_file, midi_data, '%.6f', '\t', header='onset\toffset\tnote\tvelocity')
 
 
     def files():
