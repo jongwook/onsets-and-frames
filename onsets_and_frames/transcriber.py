@@ -1,7 +1,7 @@
 """
 A rough translation of Magenta's Onsets and Frames implementation [1].
 
-    [1] https://github.com/tensorflow/magenta/blob/master/magenta/onsets_and_frames/onsets_frames_transcription/onsets_and_frames.py
+    [1] https://github.com/tensorflow/magenta/blob/master/magenta/models/onsets_frames_transcription/model.py
 """
 
 import torch
