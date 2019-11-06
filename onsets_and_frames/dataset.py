@@ -21,7 +21,8 @@ class PianoRollAudioDataset(Dataset):
         self.random = np.random.RandomState(seed)
 
         self.data = []
-        print('Loading %d group%s of %s at %s' % (len(groups), 's'[:len(groups)-1], self.__class__.__name__, path))
+        print(f"Loading {len(groups)} group{'s' if len(groups) > 1 else ''} "
+              f"of {self.__class__.__name__} at {path}")
         for group in groups:
             for input_files in tqdm(self.files(group), desc='Loading group %s' % group):
                 self.data.append(self.load(*input_files))
@@ -77,11 +78,15 @@ class PianoRollAudioDataset(Dataset):
         -------
             A dictionary containing the following data:
 
+            path: str
+                the path to the audio file
+
             audio: torch.ShortTensor, shape = [num_samples]
                 the raw waveform
 
-            ramp: torch.ByteTensor, shape = [num_steps, midi_bins]
-                a matrix that contains the number of frames after the corresponding onset
+            label: torch.ByteTensor, shape = [num_steps, midi_bins]
+                a matrix that contains the onset/offset/frame labels encoded as:
+                3 = onset, 2 = frames after onset, 1 = offset, 0 = all else
 
             velocity: torch.ByteTensor, shape = [num_steps, midi_bins]
                 a matrix that contains MIDI velocity values at the frame locations
