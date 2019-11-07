@@ -41,6 +41,18 @@ def config():
 
     leave_one_out = None
 
+    gan_type = None  # otherwise 'wgan-gp', 'lsgan', or 'vanilla'
+    gan_critic_iterations = 5 if gan_type == 'wgan-gp' else 1
+    gan_real_label = 1.0
+    gan_fake_label = 0.0
+    gan_mixup = 0.0
+    gan_gp_lambda = 10.0
+
+    lambda_pix2pix = 100.0
+
+    discriminator_optimizer = 'adam'
+    discriminator_learning_rate = 0.0001
+
     clip_gradient_norm = 3
 
     validation_length = sequence_length
@@ -52,6 +64,8 @@ def config():
 @ex.automain
 def train(logdir, device, iterations, resume_iteration, checkpoint_interval, train_on, batch_size, sequence_length,
           model_complexity, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate, leave_one_out,
+          gan_type, gan_critic_iterations, gan_real_label, gan_fake_label, gan_mixup, gan_gp_lambda, lambda_pix2pix,
+          discriminator_optimizer, discriminator_learning_rate,
           clip_gradient_norm, validation_length, validation_interval):
     print_config(ex.current_run)
 
@@ -87,18 +101,104 @@ def train(logdir, device, iterations, resume_iteration, checkpoint_interval, tra
     summary(model)
     scheduler = StepLR(optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate)
 
-    loop = tqdm(range(resume_iteration + 1, iterations + 1))
-    for i, batch in zip(loop, cycle(loader)):
-        predictions, losses = model.run_on_batch(batch)
+    if gan_type is None:
+        gan_loss = None
+        discriminator = None
+        discriminator_optimizer = None
+        discriminator_scheduler = None
+    else:
+        discriminator = FullyConvolutionalDiscriminator().to(device)
 
-        loss = sum(losses.values())
+        if gan_type == 'vanilla':
+            gan_loss = VanillaGANLoss(discriminator, gan_real_label, gan_fake_label, gan_mixup)
+        elif gan_type == 'lsgan':
+            gan_loss = LSGANLoss(discriminator, gan_real_label, gan_fake_label, gan_mixup)
+        elif gan_type == 'wgan-gp':
+            gan_loss = WGANGPLoss(discriminator, gan_real_label, gan_fake_label, gan_mixup, lambda_gp=gan_gp_lambda)
+        else:
+            raise RuntimeError(f'Unsupported GAN type: {gan_type}')
+
+        gan_loss.to(device)
+        discriminator_optimizer_class = torch.optim.Adam if discriminator_optimizer == 'adam' else torch.optim.SGD
+        discriminator_optimizer = discriminator_optimizer_class(discriminator.parameters(), discriminator_learning_rate)
+        discriminator_scheduler = StepLR(discriminator_optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate)
+
+        summary(discriminator)
+
+    loop = tqdm(range(resume_iteration + 1, iterations + 1))
+    data_iterator = cycle(loader)
+    for i in loop:
+        batch = None
+        transcriber_loss = None
+
+        # train discriminator
+        if gan_loss is not None:
+            discriminator_scheduler.step()
+            losses = dict()
+
+            for j in range(gan_critic_iterations):
+                batch = next(data_iterator)
+                predictions, losses = model.run_on_batch(batch)
+                transcriber_loss = sum(losses.values())
+
+                real_predictions = torch.stack((batch['onset'], batch['frame']), dim=1)
+                fake_predictions = torch.stack((predictions['onset'].detach(), predictions['frame'].detach()), dim=1)
+                gan_losses = gan_loss(real_predictions, fake_predictions)
+                loss = sum(gan_losses)
+
+                losses['loss/discriminator'] = loss
+                losses['loss/discriminator/real'] = gan_losses[0]
+                losses['loss/discriminator/fake'] = gan_losses[1]
+
+                if len(gan_losses) > 2:
+                    losses['loss/discriminator/penalty'] = gan_losses[2]
+
+                discriminator_optimizer.zero_grad()
+                loss.backward()
+
+                if clip_gradient_norm:
+                    clip_grad_norm_(discriminator.parameters(), clip_gradient_norm)
+
+                discriminator_optimizer.step()
+
+            for key, value in losses.items():
+                writer.add_scalar(key, value.item(), global_step=i)
+
+        if batch is None:
+            batch = next(data_iterator)
+            predictions, losses = model.run_on_batch(batch)
+            transcriber_loss = sum(losses.values())
+        else:
+            # reuse the predictions and losses from the discriminator step above
+            losses = dict()  # skip the logs that are already written above
+
+        losses['loss/generator/transcriber'] = transcriber_loss
+        loss = transcriber_loss
+
+        if gan_loss is not None:
+            real_predictions = torch.stack((batch['onset'], batch['frame']), dim=1)
+            fake_predictions = torch.stack((predictions['onset'], predictions['frame']), dim=1)
+
+            gan_losses = gan_loss(fake_predictions, real_predictions, skip_fake_loss=True)
+            penalized_gan_loss = gan_losses[0] + gan_losses[2] if len(gan_losses) > 2 else gan_losses[0]
+
+            loss = transcriber_loss * lambda_pix2pix + penalized_gan_loss
+            losses['loss/generator/discriminator'] = penalized_gan_loss
+            losses['loss/generator/discriminator/gan'] = gan_losses[0]
+
+            if len(gan_losses) > 2:
+                losses['loss/generator/discriminator/penalty'] = gan_losses[2]
+
+        losses['loss/generator'] = loss
+
         optimizer.zero_grad()
         loss.backward()
-        optimizer.step()
-        scheduler.step()
 
         if clip_gradient_norm:
             clip_grad_norm_(model.parameters(), clip_gradient_norm)
+
+        optimizer.step()
+        scheduler.step()
 
         for key, value in {'loss': loss, **losses}.items():
             writer.add_scalar(key, value.item(), global_step=i)
@@ -113,3 +213,7 @@ def train(logdir, device, iterations, resume_iteration, checkpoint_interval, tra
         if i % checkpoint_interval == 0:
             torch.save(model, os.path.join(logdir, f'model-{i}.pt'))
             torch.save(optimizer.state_dict(), os.path.join(logdir, 'last-optimizer-state.pt'))
+
+            if discriminator is not None:
+                torch.save(discriminator.state_dict(), os.path.join(logdir, 'last-discriminator-state.pt'))
+                torch.save(discriminator_optimizer.state_dict(), os.path.join(logdir, 'last-discriminator-optimizer-state.pt'))
