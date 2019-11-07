@@ -133,7 +133,6 @@ def train(logdir, device, iterations, resume_iteration, checkpoint_interval, tra
 
         # train discriminator
         if gan_loss is not None:
-            discriminator_scheduler.step()
             losses = dict()
 
             for j in range(gan_critic_iterations):
@@ -160,6 +159,7 @@ def train(logdir, device, iterations, resume_iteration, checkpoint_interval, tra
                     clip_grad_norm_(discriminator.parameters(), clip_gradient_norm)
 
                 discriminator_optimizer.step()
+                discriminator_scheduler.step()
 
             for key, value in losses.items():
                 writer.add_scalar(key, value.item(), global_step=i)
