@@ -24,6 +24,7 @@ def config():
     iterations = 500000
     resume_iteration = None
     checkpoint_interval = 1000
+    train_on = 'MAESTRO'
 
     batch_size = 8
     sequence_length = 327680
@@ -49,7 +50,7 @@ def config():
 
 
 @ex.automain
-def train(logdir, device, iterations, resume_iteration, checkpoint_interval, batch_size, sequence_length,
+def train(logdir, device, iterations, resume_iteration, checkpoint_interval, train_on, batch_size, sequence_length,
           model_complexity, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate, leave_one_out,
           clip_gradient_norm, validation_length, validation_interval):
     print_config(ex.current_run)
@@ -64,10 +65,14 @@ def train(logdir, device, iterations, resume_iteration, checkpoint_interval, bat
         train_groups = list(all_years - {str(leave_one_out)})
         validation_groups = [str(leave_one_out)]
 
-    dataset = MAESTRO(groups=train_groups, sequence_length=sequence_length)
-    loader = DataLoader(dataset, batch_size, shuffle=True)
+    if train_on == 'MAESTRO':
+        dataset = MAESTRO(groups=train_groups, sequence_length=sequence_length)
+        validation_dataset = MAESTRO(groups=validation_groups, sequence_length=sequence_length)
+    else:
+        dataset = MAPS(groups=['AkPnBcht', 'AkPnBsdf', 'AkPnCGdD', 'AkPnStgb', 'SptkBGAm', 'SptkBGCl', 'StbgTGd2'], sequence_length=sequence_length)
+        validation_dataset = MAPS(groups=['ENSTDkAm', 'ENSTDkCl'], sequence_length=validation_length)
 
-    validation_dataset = MAESTRO(groups=validation_groups, sequence_length=validation_length)
+    loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
 
     if resume_iteration is None:
         model = OnsetsAndFrames(N_MELS, MAX_MIDI - MIN_MIDI + 1, model_complexity).to(device)
@@ -84,13 +89,13 @@ def train(logdir, device, iterations, resume_iteration, checkpoint_interval, bat
 
     loop = tqdm(range(resume_iteration + 1, iterations + 1))
     for i, batch in zip(loop, cycle(loader)):
-        scheduler.step()
         predictions, losses = model.run_on_batch(batch)
 
         loss = sum(losses.values())
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         if clip_gradient_norm:
             clip_grad_norm_(model.parameters(), clip_gradient_norm)
