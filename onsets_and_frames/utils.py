@@ -71,8 +71,8 @@ def save_pianoroll(path, onsets, frames, onset_threshold=0.5, frame_threshold=0.
     frame_threshold: float
     zoom: int
     """
-    onsets = (1 - (onsets.t() > onset_threshold)).cpu()
-    frames = (1 - (frames.t() > frame_threshold)).cpu()
+    onsets = (1 - (onsets.t() > onset_threshold).to(torch.uint8)).cpu()
+    frames = (1 - (frames.t() > frame_threshold).to(torch.uint8)).cpu()
     both = (1 - (1 - onsets) * (1 - frames))
     image = torch.stack([onsets, frames, both], dim=2).flip(0).mul(255).numpy()
     image = Image.fromarray(image, 'RGB')
