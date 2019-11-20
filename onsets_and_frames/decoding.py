@@ -20,8 +20,8 @@ def extract_notes(onsets, frames, velocity, onset_threshold=0.5, frame_threshold
     intervals: np.ndarray of rows containing (onset_index, offset_index)
     velocities: np.ndarray of velocity values
     """
-    onsets = (onsets > onset_threshold).cpu()
-    frames = (frames > frame_threshold).cpu()
+    onsets = (onsets > onset_threshold).cpu().to(torch.uint8)
+    frames = (frames > frame_threshold).cpu().to(torch.uint8)
     onset_diff = torch.cat([onsets[:1, :], onsets[1:, :] - onsets[:-1, :]], dim=0) == 1
 
     pitches = []
