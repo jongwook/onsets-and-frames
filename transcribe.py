@@ -1,12 +1,13 @@
 import argparse
 import os
+import sys
+
 import numpy as np
 import soundfile
-import torch
 from mir_eval.util import midi_to_hz
 
-from onsets_and_frames.mel import melspectrogram
 from onsets_and_frames import *
+
 
 def load_and_process_audio(flac_path, sequence_length, device):
 
@@ -33,6 +34,7 @@ def load_and_process_audio(flac_path, sequence_length, device):
 
     return audio
 
+
 def transcribe(model, audio):
 
     mel = melspectrogram(audio.reshape(-1, audio.shape[-1])[:, :-1]).transpose(-1, -2)
@@ -47,33 +49,37 @@ def transcribe(model, audio):
 
     return predictions
 
-def transcribe_file(model_file, flac_path, save_path, sequence_length,
+
+def transcribe_file(model_file, flac_paths, save_path, sequence_length,
                   onset_threshold, frame_threshold, device):
 
     model = torch.load(model_file, map_location=device).eval()
     summary(model)
 
-    audio = load_and_process_audio(flac_path, sequence_length, device)
-    predictions = transcribe(model, audio)
+    for flac_path in flac_paths:
+        print(f'Processing {flac_path}...', file=sys.stderr)
+        audio = load_and_process_audio(flac_path, sequence_length, device)
+        predictions = transcribe(model, audio)
 
-    p_est, i_est, v_est = extract_notes(predictions['onset'], predictions['frame'], predictions['velocity'], onset_threshold, frame_threshold)
+        p_est, i_est, v_est = extract_notes(predictions['onset'], predictions['frame'], predictions['velocity'], onset_threshold, frame_threshold)
 
-    scaling = HOP_LENGTH / SAMPLE_RATE
+        scaling = HOP_LENGTH / SAMPLE_RATE
 
-    i_est = (i_est * scaling).reshape(-1, 2)
-    p_est = np.array([midi_to_hz(MIN_MIDI + midi) for midi in p_est])
+        i_est = (i_est * scaling).reshape(-1, 2)
+        p_est = np.array([midi_to_hz(MIN_MIDI + midi) for midi in p_est])
 
-    os.makedirs(save_path, exist_ok=True)
-    pred_path = os.path.join(save_path, os.path.basename(flac_path) + '.pred.png')
-    save_pianoroll(pred_path, predictions['onset'], predictions['frame'])
-    midi_path = os.path.join(save_path, os.path.basename(flac_path) + '.pred.mid')
-    save_midi(midi_path, p_est, i_est, v_est)
+        os.makedirs(save_path, exist_ok=True)
+        pred_path = os.path.join(save_path, os.path.basename(flac_path) + '.pred.png')
+        save_pianoroll(pred_path, predictions['onset'], predictions['frame'])
+        midi_path = os.path.join(save_path, os.path.basename(flac_path) + '.pred.mid')
+        save_midi(midi_path, p_est, i_est, v_est)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model-file', type=str)
-    parser.add_argument('--flac-path', type=str)
-    parser.add_argument('--save-path', type=str)
+    parser.add_argument('model_file', type=str)
+    parser.add_argument('flac_paths', type=str, nargs='+')
+    parser.add_argument('--save-path', type=str, default='.')
     parser.add_argument('--sequence-length', default=None, type=int)
     parser.add_argument('--onset-threshold', default=0.5, type=float)
     parser.add_argument('--frame-threshold', default=0.5, type=float)

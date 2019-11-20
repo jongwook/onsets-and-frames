@@ -7,4 +7,4 @@ numpy>=1.15.0
 tqdm>=4.28.1
 git+https://github.com/craffel/mir_eval.git
 mido>=1.2.9
-Pillow==6.2.0
+Pillow>=6.2.0
