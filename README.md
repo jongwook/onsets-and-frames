@@ -55,6 +55,12 @@ In order to test on the Maestro dataset's test split instead of the MAPS databas
 python evaluate.py runs/model/model-100000.pt Maestro test
 ```
 
+You can download a pretrained model [here](https://drive.google.com/file/d/1Mj2Em07Lvl3mvDQCCxOYHjPiB-S0WGT1/view?usp=sharing) and run `transcribe.py` to transcribe piano audio files:
+
+```bash
+python transcribe.py model-500000.pt <path to audio files> --save-path output/
+```
+
 ## Implementation Details
 
 This implementation contains a few of the additional improvements on the model that were reported in the Maestro paper, including:
@@ -71,5 +77,3 @@ Meanwhile, this implementation does not include the following features:
 * Harmonically decaying weights on the frame loss
 
 Despite these, this implementation is able to achieve a comparable performance to what is reported on the Maestro paper as the performance without data augmentation.
-
-
