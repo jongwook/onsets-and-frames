@@ -67,9 +67,9 @@ def transcribe_file(model_file, audio_paths, save_path, sequence_length,
     model = torch.load(model_file, map_location=device).eval()
     summary(model)
 
-    for i,flac_path in enumerate(audio_paths):
-        print(f'{i+1}/{len(audio_paths)}: Processing {flac_path}...', file=sys.stderr)
-        audio = load_and_process_audio(flac_path, sequence_length, device)
+    for i,audio_path in enumerate(audio_paths):
+        print(f'{i+1}/{len(audio_paths)}: Processing {audio_path}...', file=sys.stderr)
+        audio = load_and_process_audio(audio_path, sequence_length, device)
         predictions = transcribe(model, audio)
 
         p_est, i_est, v_est = extract_notes(predictions['onset'], predictions['frame'], predictions['velocity'], onset_threshold, frame_threshold)
@@ -80,9 +80,9 @@ def transcribe_file(model_file, audio_paths, save_path, sequence_length,
         p_est = np.array([midi_to_hz(MIN_MIDI + midi) for midi in p_est])
 
         os.makedirs(save_path, exist_ok=True)
-        pred_path = os.path.join(save_path, os.path.basename(flac_path) + '.pred.png')
+        pred_path = os.path.join(save_path, os.path.basename(audio_path) + '.pred.png')
         save_pianoroll(pred_path, predictions['onset'], predictions['frame'])
-        midi_path = os.path.join(save_path, os.path.basename(flac_path) + '.pred.mid')
+        midi_path = os.path.join(save_path, os.path.basename(audio_path) + '.pred.mid')
         save_midi(midi_path, p_est, i_est, v_est)
 
 
