@@ -42,7 +42,8 @@ def parse_midi(path):
 
         if offset['sustain'] and offset is not events[-1]:
             # if the sustain pedal is active at offset, find when the sustain ends
-            offset = next(n for n in events[offset['index'] + 1:] if n['type'] == 'sustain_off' or n is events[-1])
+            offset = next(n for n in events[offset['index'] + 1:]
+                          if n['type'] == 'sustain_off' or n['note'] == onset['note'] or n is events[-1])
 
         note = (onset['time'], offset['time'], onset['note'], onset['velocity'])
         notes.append(note)
