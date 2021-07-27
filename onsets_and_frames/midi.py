@@ -2,9 +2,10 @@ import multiprocessing
 import sys
 
 import mido
+import pretty_midi
 import numpy as np
+import collections
 from joblib import Parallel, delayed
-from mido import Message, MidiFile, MidiTrack
 from mir_eval.util import hz_to_midi
 from tqdm import tqdm
 
@@ -61,28 +62,32 @@ def save_midi(path, pitches, intervals, velocities):
     intervals: list of (onset_index, offset_index)
     velocities: list of velocity values
     """
-    file = MidiFile()
-    track = MidiTrack()
-    file.tracks.append(track)
-    ticks_per_second = file.ticks_per_beat * 2.0
+    file = pretty_midi.PrettyMIDI()
+    piano_program = pretty_midi.instrument_name_to_program('Acoustic Grand Piano')
+    piano = pretty_midi.Instrument(program=piano_program)
 
-    events = []
+    # Remove overlapping intervals (end time should be smaller of equal start time of next note on the same pitch)
+    intervals_dict = collections.defaultdict(list)
     for i in range(len(pitches)):
-        events.append(dict(type='on', pitch=pitches[i], time=intervals[i][0], velocity=velocities[i]))
-        events.append(dict(type='off', pitch=pitches[i], time=intervals[i][1], velocity=velocities[i]))
-    events.sort(key=lambda row: row['time'])
+        pitch = int(round(hz_to_midi(pitches[i])))
+        intervals_dict[pitch].append((intervals[i], i))
+    for pitch in intervals_dict:
+        interval_list = intervals_dict[pitch]
+        interval_list.sort(key=lambda x: x[0][0])
+        for i in range(len(interval_list) - 1):
+            # assert interval_list[i][1] <= interval_list[i+1][0], f'End time should be smaller of equal start time of next note on the same pitch. It was {interval_list[i][1]}, {interval_list[i+1][0]} for pitch {key}'
+            interval_list[i][0][1] = min(interval_list[i][0][1], interval_list[i+1][0][0])
 
-    last_tick = 0
-    for event in events:
-        current_tick = int(event['time'] * ticks_per_second)
-        velocity = int(event['velocity'] * 127)
-        if velocity > 127:
-            velocity = 127
-        pitch = int(round(hz_to_midi(event['pitch'])))
-        track.append(Message('note_' + event['type'], note=pitch, velocity=velocity, time=current_tick - last_tick))
-        last_tick = current_tick
+    for pitch in intervals_dict:
+        interval_list = intervals_dict[pitch]
+        for interval,i in interval_list:
+            pitch = int(round(hz_to_midi(pitches[i])))
+            velocity = int(127*min(velocities[i], 1))
+            note = pretty_midi.Note(velocity=velocity, pitch=pitch, start=interval[0], end=interval[1])
+            piano.notes.append(note)
 
-    file.save(path)
+    file.instruments.append(piano)
+    file.write(path)
 
 
 if __name__ == '__main__':

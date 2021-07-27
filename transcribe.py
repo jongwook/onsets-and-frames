@@ -3,18 +3,29 @@ import os
 import sys
 
 import numpy as np
-import soundfile
+import librosa
 from mir_eval.util import midi_to_hz
+from torch import dtype
 
 from onsets_and_frames import *
+
+def float_samples_to_int16(y):
+  """Convert floating-point numpy array of audio samples to int16."""
+  # From https://github.com/tensorflow/magenta/blob/671501934ff6783a7912cc3e0e628fd0ea2dc609/magenta/music/audio_io.py#L48
+  if not issubclass(y.dtype.type, np.floating):
+    raise ValueError('input samples not floating-point')
+  return (y * np.iinfo(np.int16).max).astype(np.int16)
 
 
 def load_and_process_audio(flac_path, sequence_length, device):
 
     random = np.random.RandomState(seed=42)
 
-    audio, sr = soundfile.read(flac_path, dtype='int16')
+    audio, sr = librosa.load(flac_path, sr=SAMPLE_RATE)
+    audio = float_samples_to_int16(audio)
+    
     assert sr == SAMPLE_RATE
+    assert audio.dtype == 'int16'
 
     audio = torch.ShortTensor(audio)
 
@@ -50,15 +61,15 @@ def transcribe(model, audio):
     return predictions
 
 
-def transcribe_file(model_file, flac_paths, save_path, sequence_length,
+def transcribe_file(model_file, audio_paths, save_path, sequence_length,
                   onset_threshold, frame_threshold, device):
 
     model = torch.load(model_file, map_location=device).eval()
     summary(model)
 
-    for flac_path in flac_paths:
-        print(f'Processing {flac_path}...', file=sys.stderr)
-        audio = load_and_process_audio(flac_path, sequence_length, device)
+    for i,audio_path in enumerate(audio_paths):
+        print(f'{i+1}/{len(audio_paths)}: Processing {audio_path}...', file=sys.stderr)
+        audio = load_and_process_audio(audio_path, sequence_length, device)
         predictions = transcribe(model, audio)
 
         p_est, i_est, v_est = extract_notes(predictions['onset'], predictions['frame'], predictions['velocity'], onset_threshold, frame_threshold)
@@ -69,16 +80,16 @@ def transcribe_file(model_file, flac_paths, save_path, sequence_length,
         p_est = np.array([midi_to_hz(MIN_MIDI + midi) for midi in p_est])
 
         os.makedirs(save_path, exist_ok=True)
-        pred_path = os.path.join(save_path, os.path.basename(flac_path) + '.pred.png')
+        pred_path = os.path.join(save_path, os.path.basename(audio_path) + '.pred.png')
         save_pianoroll(pred_path, predictions['onset'], predictions['frame'])
-        midi_path = os.path.join(save_path, os.path.basename(flac_path) + '.pred.mid')
+        midi_path = os.path.join(save_path, os.path.basename(audio_path) + '.pred.mid')
         save_midi(midi_path, p_est, i_est, v_est)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_file', type=str)
-    parser.add_argument('flac_paths', type=str, nargs='+')
+    parser.add_argument('audio_paths', type=str, nargs='+')
     parser.add_argument('--save-path', type=str, default='.')
     parser.add_argument('--sequence-length', default=None, type=int)
     parser.add_argument('--onset-threshold', default=0.5, type=float)
